@@ -20,7 +20,7 @@ import (
 	"k8c.io/kubeone/pkg/fail"
 	"k8c.io/kubeone/pkg/state"
 	"k8c.io/kubeone/pkg/templates/machinecontroller"
-	clusterv1alpha1 "k8c.io/machine-controller/pkg/apis/cluster/v1alpha1"
+	clusterv1alpha1 "k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/util/retry"
@@ -28,7 +28,7 @@ import (
 )
 
 const (
-	machineDeploymentsDocsLink = `https://docs.kubermatic.com/kubeone/v1.9/guides/machine-controller/`
+	machineDeploymentsDocsLink = `https://docs.kubermatic.com/kubeone/main/guides/machine-controller/`
 )
 
 func createMachineDeployments(s *state.State) error {

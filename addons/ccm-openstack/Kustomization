@@ -1,7 +1,12 @@
 namespace: kube-system
 
-resources:
-  - ccm-openstack.yaml
+helmCharts:
+- name: openstack-cloud-controller-manager
+  repo: https://kubernetes.github.io/cloud-provider-openstack
+  version: 2.34.0
+  releaseName: openstack-ccm
+  namespace: kube-system
+  valuesFile: generate-values-ccm
 
 patches:
   - target:
@@ -15,7 +20,7 @@ patches:
       - op: add
         path: "/spec/template/metadata/annotations"
         value:
-          "kubeone.k8c.io/cabundle-hash": '{{.Config.CABundle | sha256sum}}'
+          "kubeone.k8c.io/cabundle-hash": '{{CABundle | sha256sum}}'
           "kubeone.k8c.io/cloudconfig-hash": '{{.Config.CloudProvider.CloudConfig | sha256sum}}'
       - op: replace
         path: "/spec/template/spec/containers/0/env/0/value"

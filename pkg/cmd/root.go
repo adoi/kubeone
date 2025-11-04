@@ -24,7 +24,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"k8c.io/kubeone/pkg/fail"
-	clusterv1alpha1 "k8c.io/machine-controller/pkg/apis/cluster/v1alpha1"
+	clusterv1alpha1 "k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
 
 	apiextensionsscheme "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset/scheme"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -49,7 +49,7 @@ func Execute() {
 		panic(err)
 	}
 
-	rootCmd := newRoot()
+	rootCmd := NewRoot()
 
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s\n", err)
@@ -69,7 +69,7 @@ func Execute() {
 	}
 }
 
-func newRoot() *cobra.Command {
+func NewRoot() *cobra.Command {
 	opts := &globalOptions{}
 
 	rootCmd := &cobra.Command{
@@ -125,6 +125,7 @@ func newRoot() *cobra.Command {
 		applyCmd(fs),
 		completionCmd(rootCmd),
 		configCmd(fs),
+		certificatesCmd(fs),
 		documentCmd(rootCmd),
 		initCmd(),
 		kubeconfigCmd(fs),
@@ -135,6 +136,7 @@ func newRoot() *cobra.Command {
 		statusCmd(fs),
 		versionCmd(),
 		uiCmd(fs),
+		mirrorImagesCmd(fs),
 	)
 
 	return rootCmd

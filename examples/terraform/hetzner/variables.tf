@@ -123,7 +123,7 @@ variable "image_references" {
     }
 
     rockylinux = {
-      image_name   = "rocky-8"
+      image_name   = "rocky-9"
       ssh_username = "root"
       worker_os    = "rockylinux"
     }
@@ -131,7 +131,7 @@ variable "image_references" {
 }
 
 variable "control_plane_type" {
-  default = "cx22"
+  default = "cx23"
   type    = string
 }
 
@@ -153,7 +153,7 @@ variable "control_plane_vm_count" {
 }
 
 variable "worker_type" {
-  default = "cx22"
+  default = "cx23"
   type    = string
 }
 

@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -33,6 +34,7 @@ import (
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
 
+	kubeoneapi "k8c.io/kubeone/pkg/apis/kubeone"
 	"k8c.io/kubeone/pkg/certificate/cabundle"
 	"k8c.io/kubeone/pkg/fail"
 	"k8c.io/kubeone/pkg/state"
@@ -53,17 +55,13 @@ const (
 	ParamsEnvPrefix = "env:"
 )
 
-func (a *applier) getManifestsFromDirectory(s *state.State, fsys fs.FS, addonName string) (string, error) {
-	var addonParams map[string]string
-	disableTemplating := false
-
-	overwriteRegistry := ""
-	if s.Cluster.RegistryConfiguration != nil && s.Cluster.RegistryConfiguration.OverwriteRegistry != "" {
-		overwriteRegistry = s.Cluster.RegistryConfiguration.OverwriteRegistry
-	}
-
-	if s.Cluster.Addons.Enabled() {
-		for _, addon := range s.Cluster.Addons.OnlyAddons() {
+func (a *applier) getManifestsFromDirectory(st *state.State, fsys fs.FS, addonName string) (string, error) {
+	var (
+		addonParams       map[string]string
+		disableTemplating = false
+	)
+	if st.Cluster.Addons.Enabled() {
+		for _, addon := range st.Cluster.Addons.OnlyAddons() {
 			if addon.Name == addonName {
 				addonParams = addon.Params
 				disableTemplating = addon.DisableTemplating
@@ -73,22 +71,55 @@ func (a *applier) getManifestsFromDirectory(s *state.State, fsys fs.FS, addonNam
 		}
 	}
 
-	manifests, err := a.loadAddonsManifests(fsys, addonName, addonParams, s.Logger, s.Verbose, overwriteRegistry, disableTemplating)
+	manifests, err := a.loadAddonsManifests(fsys, addonName, addonParams, st.Logger, st.Verbose, st.Cluster, disableTemplating)
 	if err != nil {
 		return "", err
 	}
 
-	if s.Cluster.CloudProvider.SecretProviderClassName != "" && !disableTemplating {
-		addonsToMutate := sets.NewString(
-			append(
-				resources.CloudAddons(),
-				resources.AddonOperatingSystemManager,
-				resources.AddonMachineController,
-			)...,
-		)
+	addonsToMutate := sets.NewString(
+		append(
+			resources.CloudAddons(),
+			resources.AddonBackupsRestic,
+			resources.AddonOperatingSystemManager,
+			resources.AddonMachineController,
+		)...,
+	)
 
-		if addonsToMutate.Has(addonName) {
-			if err = addSecretCSIVolume(manifests, s.Cluster.CloudProvider.SecretProviderClassName); err != nil {
+	if !disableTemplating && addonsToMutate.Has(addonName) {
+		if st.Cluster.CABundle != "" {
+			if err = mutatePodTemplateSpec(manifests, func(podTpl *corev1.PodTemplateSpec) {
+				cabundle.Inject(st.Cluster.CABundle, podTpl)
+			}); err != nil {
+				return "", err
+			}
+		}
+
+		if st.Cluster.CloudProvider.SecretProviderClassName != "" {
+			if err = mutatePodTemplateSpec(manifests, func(podSpec *corev1.PodTemplateSpec) {
+				volume := corev1.Volume{
+					Name: "secrets-store",
+					VolumeSource: corev1.VolumeSource{
+						CSI: &corev1.CSIVolumeSource{
+							Driver:   "secrets-store.csi.k8s.io",
+							ReadOnly: ptr.To(true),
+							VolumeAttributes: map[string]string{
+								"secretProviderClass": st.Cluster.CloudProvider.SecretProviderClassName,
+							},
+						},
+					},
+				}
+
+				volumeMount := corev1.VolumeMount{
+					Name:      "secrets-store",
+					MountPath: "/mnt/secrets-store",
+					ReadOnly:  true,
+				}
+
+				podSpec.Spec.Volumes = append(podSpec.Spec.Volumes, volume)
+				for i := range podSpec.Spec.Containers {
+					podSpec.Spec.Containers[i].VolumeMounts = append(podSpec.Spec.Containers[i].VolumeMounts, volumeMount)
+				}
+			}); err != nil {
 				return "", err
 			}
 		}
@@ -111,7 +142,7 @@ func (a *applier) loadAddonsManifests(
 	addonParams map[string]string,
 	logger logrus.FieldLogger,
 	verbose bool,
-	overwriteRegistry string,
+	k1cluster *kubeoneapi.KubeOneCluster,
 	disableTemplating bool,
 ) ([]runtime.RawExtension, error) {
 	var manifests []runtime.RawExtension
@@ -154,29 +185,33 @@ func (a *applier) loadAddonsManifests(
 			res = strings.ReplaceAll(res, "}}", "}}^")
 			manifestBytes = []byte(res)
 		}
-
-		var manifest *bytes.Buffer
-		manifest = bytes.NewBuffer(manifestBytes)
+		manifest := bytes.NewBuffer(manifestBytes)
 
 		if !disableTemplating {
-			tpl, err := template.New("addons-base").Funcs(txtFuncMap(overwriteRegistry)).Parse(string(manifestBytes))
+			overwriteRegistry := k1cluster.RegistryConfiguration.ImageRegistry("")
+
+			tpl, err := template.New("addons-base").
+				Funcs(txtFuncMap(overwriteRegistry)).
+				Funcs(template.FuncMap{
+					"CABundle": func() string {
+						return k1cluster.CertificateAuthority.Bundle
+					},
+				}).
+				Parse(string(manifestBytes))
 			if err != nil {
 				return nil, fail.Runtime(err, "parsing addons manifest template %q", file.Name())
 			}
 
 			// Make a copy and merge Params
 			tplDataParams := map[string]string{}
-			for k, v := range a.TemplateData.Params {
-				tplDataParams[k] = v
-			}
-			for k, v := range addonParams {
-				tplDataParams[k] = v
-			}
+			maps.Copy(tplDataParams, a.TemplateData.Params)
+			maps.Copy(tplDataParams, addonParams)
+
+			defaultAddonParams(k1cluster, addonName, tplDataParams)
 
 			// Resolve environment variables in Params
 			for k, v := range tplDataParams {
-				if strings.HasPrefix(v, ParamsEnvPrefix) {
-					envName := strings.TrimPrefix(v, ParamsEnvPrefix)
+				if envName, ok := strings.CutPrefix(v, ParamsEnvPrefix); ok {
 					if env, ok := os.LookupEnv(envName); ok {
 						tplDataParams[k] = env
 					} else {
@@ -233,6 +268,23 @@ func (a *applier) loadAddonsManifests(
 	}
 
 	return manifests, nil
+}
+
+func defaultAddonParams(k1cluster *kubeoneapi.KubeOneCluster, addonName string, tplDataParams map[string]string) {
+	if addonName == resources.AddonCNICanal {
+		if k1cluster.CloudProvider.Hetzner != nil {
+			// Customize cni-canal addon on hetzner
+			defaultIfaceParam(tplDataParams, "^en")
+		}
+	}
+}
+
+func defaultIfaceParam(tplDataParams map[string]string, reg string) {
+	_, iface := tplDataParams["IFACE"]
+	_, ifaceregex := tplDataParams["IFACE_REGEX"]
+	if !iface && !ifaceregex {
+		tplDataParams["IFACE_REGEX"] = reg
+	}
 }
 
 // ensureAddonsLabelsOnResources applies the addons label on all resources in the manifest
@@ -384,26 +436,7 @@ func vSphereCSIWebhookConfigTemplateFunc() (string, error) {
 	return buf.String(), err
 }
 
-func addSecretCSIVolume(docs []runtime.RawExtension, secretProviderClassName string) error {
-	volume := corev1.Volume{
-		Name: "secrets-store",
-		VolumeSource: corev1.VolumeSource{
-			CSI: &corev1.CSIVolumeSource{
-				Driver:   "secrets-store.csi.k8s.io",
-				ReadOnly: ptr.To(true),
-				VolumeAttributes: map[string]string{
-					"secretProviderClass": secretProviderClassName,
-				},
-			},
-		},
-	}
-
-	volumeMount := corev1.VolumeMount{
-		Name:      "secrets-store",
-		MountPath: "/mnt/secrets-store",
-		ReadOnly:  true,
-	}
-
+func mutatePodTemplateSpec(docs []runtime.RawExtension, mutatorFn func(podTpl *corev1.PodTemplateSpec)) error {
 	for i := range docs {
 		ubject := metav1unstructured.Unstructured{}
 		_, _, err := metav1unstructured.UnstructuredJSONScheme.Decode(docs[i].Raw, nil, &ubject)
@@ -415,37 +448,32 @@ func addSecretCSIVolume(docs []runtime.RawExtension, secretProviderClassName str
 		case appsv1.SchemeGroupVersion.WithKind("Deployment").GroupKind():
 			var obj appsv1.Deployment
 			err = repackObject(&obj, &docs[i], func() {
-				obj.Spec.Template.Spec = addVolumeToPodSpec(obj.Spec.Template.Spec, volume, volumeMount)
+				mutatorFn(&obj.Spec.Template)
 			})
 		case appsv1.SchemeGroupVersion.WithKind("StatefulSet").GroupKind():
 			var obj appsv1.StatefulSet
 			err = repackObject(&obj, &docs[i], func() {
-				obj.Spec.Template.Spec = addVolumeToPodSpec(obj.Spec.Template.Spec, volume, volumeMount)
+				mutatorFn(&obj.Spec.Template)
 			})
 		case appsv1.SchemeGroupVersion.WithKind("DaemonSet").GroupKind():
 			var obj appsv1.DaemonSet
 			err = repackObject(&obj, &docs[i], func() {
-				obj.Spec.Template.Spec = addVolumeToPodSpec(obj.Spec.Template.Spec, volume, volumeMount)
+				mutatorFn(&obj.Spec.Template)
 			})
 		case appsv1.SchemeGroupVersion.WithKind("ReplicaSet").GroupKind():
 			var obj appsv1.ReplicaSet
 			err = repackObject(&obj, &docs[i], func() {
-				obj.Spec.Template.Spec = addVolumeToPodSpec(obj.Spec.Template.Spec, volume, volumeMount)
-			})
-		case corev1.SchemeGroupVersion.WithKind("Pod").GroupKind():
-			var obj corev1.Pod
-			err = repackObject(&obj, &docs[i], func() {
-				obj.Spec = addVolumeToPodSpec(obj.Spec, volume, volumeMount)
+				mutatorFn(&obj.Spec.Template)
 			})
 		case batchv1.SchemeGroupVersion.WithKind("Job").GroupKind():
 			var obj batchv1.Job
 			err = repackObject(&obj, &docs[i], func() {
-				obj.Spec.Template.Spec = addVolumeToPodSpec(obj.Spec.Template.Spec, volume, volumeMount)
+				mutatorFn(&obj.Spec.Template)
 			})
 		case batchv1.SchemeGroupVersion.WithKind("CronJob").GroupKind():
 			var obj batchv1.CronJob
 			err = repackObject(&obj, &docs[i], func() {
-				obj.Spec.JobTemplate.Spec.Template.Spec = addVolumeToPodSpec(obj.Spec.JobTemplate.Spec.Template.Spec, volume, volumeMount)
+				mutatorFn(&obj.Spec.JobTemplate.Spec.Template)
 			})
 		}
 
@@ -477,13 +505,4 @@ func repackObject(kubeobject runtime.Object, obj *runtime.RawExtension, mutator 
 	obj.Raw = js
 
 	return nil
-}
-
-func addVolumeToPodSpec(podSpec corev1.PodSpec, volume corev1.Volume, volumeMount corev1.VolumeMount) corev1.PodSpec {
-	podSpec.Volumes = append(podSpec.Volumes, volume)
-	for i := range podSpec.Containers {
-		podSpec.Containers[i].VolumeMounts = append(podSpec.Containers[i].VolumeMounts, volumeMount)
-	}
-
-	return podSpec
 }

@@ -25,10 +25,9 @@ import (
 
 func setupKubernetesBinaries(s *state.State, node kubeoneapi.HostConfig, params scripts.Params) error {
 	return runOnOS(s, node.OperatingSystem, map[kubeoneapi.OperatingSystemName]runOnOSFn{
-		kubeoneapi.OperatingSystemNameAmazon:     kubernetesBinariesAmazonLinux(params),
 		kubeoneapi.OperatingSystemNameCentOS:     kubernetesBinariesRHELLike(params),
 		kubeoneapi.OperatingSystemNameDebian:     kubernetesBinariesDeb(params),
-		kubeoneapi.OperatingSystemNameFlatcar:    upgradeKubernetesBinariesFlatcar,
+		kubeoneapi.OperatingSystemNameFlatcar:    kubernetesBinariesFlatcar(params),
 		kubeoneapi.OperatingSystemNameRHEL:       kubernetesBinariesRHELLike(params),
 		kubeoneapi.OperatingSystemNameRockyLinux: kubernetesBinariesRHELLike(params),
 		kubeoneapi.OperatingSystemNameUbuntu:     kubernetesBinariesDeb(params),
@@ -54,20 +53,9 @@ func kubernetesBinariesDeb(params scripts.Params) func(*state.State) error {
 	}
 }
 
-func upgradeKubernetesBinariesFlatcar(s *state.State) error {
-	cmd, err := scripts.UpgradeKubernetesBinariesFlatcar(s.Cluster)
-	if err != nil {
-		return err
-	}
-
-	_, _, err = s.Runner.RunRaw(cmd)
-
-	return fail.SSH(err, "upgrading kubelet and kubectl")
-}
-
-func kubernetesBinariesRHELLike(params scripts.Params) func(*state.State) error {
+func kubernetesBinariesFlatcar(params scripts.Params) func(*state.State) error {
 	return func(s *state.State) error {
-		cmd, err := scripts.RHELLikeScript(s.Cluster, params)
+		cmd, err := scripts.FlatcarScript(s.Cluster, params)
 		if err != nil {
 			return err
 		}
@@ -78,9 +66,9 @@ func kubernetesBinariesRHELLike(params scripts.Params) func(*state.State) error 
 	}
 }
 
-func kubernetesBinariesAmazonLinux(params scripts.Params) func(*state.State) error {
+func kubernetesBinariesRHELLike(params scripts.Params) func(*state.State) error {
 	return func(s *state.State) error {
-		cmd, err := scripts.AmazonLinuxScript(s.Cluster, params)
+		cmd, err := scripts.RHELLikeScript(s.Cluster, params)
 		if err != nil {
 			return err
 		}

@@ -5,7 +5,7 @@ infrastructure for a Kubernetes HA cluster. Check out the following
 [Creating Infrastructure guide][docs-infrastructure] to learn more about how to
 use the configs and how to provision a Kubernetes cluster using KubeOne.
 
-[docs-infrastructure]: https://docs.kubermatic.com/kubeone/v1.9/guides/using-terraform-configs/
+[docs-infrastructure]: https://docs.kubermatic.com/kubeone/main/guides/using-terraform-configs/
 
 ## Requirements
 
@@ -19,6 +19,7 @@ use the configs and how to provision a Kubernetes cluster using KubeOne.
 | Name | Version |
 |------|---------|
 | <a name="provider_digitalocean"></a> [digitalocean](#provider\_digitalocean) | ~> 2.9.0 |
+| <a name="provider_time"></a> [time](#provider\_time) | n/a |
 
 ## Modules
 
@@ -32,6 +33,7 @@ No modules.
 | [digitalocean_loadbalancer.control_plane](https://registry.terraform.io/providers/digitalocean/digitalocean/latest/docs/resources/loadbalancer) | resource |
 | [digitalocean_ssh_key.deployer](https://registry.terraform.io/providers/digitalocean/digitalocean/latest/docs/resources/ssh_key) | resource |
 | [digitalocean_tag.kube_cluster_tag](https://registry.terraform.io/providers/digitalocean/digitalocean/latest/docs/resources/tag) | resource |
+| [time_sleep.wait_60_seconds](https://registry.terraform.io/providers/hashicorp/time/latest/docs/resources/sleep) | resource |
 
 ## Inputs
 
@@ -46,7 +48,7 @@ No modules.
 | <a name="input_control_plane_size"></a> [control\_plane\_size](#input\_control\_plane\_size) | Size of control plane nodes | `string` | `"s-2vcpu-4gb"` | no |
 | <a name="input_control_plane_vm_count"></a> [control\_plane\_vm\_count](#input\_control\_plane\_vm\_count) | number of control plane instances | `number` | `3` | no |
 | <a name="input_disable_kubeapi_loadbalancer"></a> [disable\_kubeapi\_loadbalancer](#input\_disable\_kubeapi\_loadbalancer) | E2E tests specific variable to disable usage of any loadbalancer in front of kubeapi-server | `bool` | `false` | no |
-| <a name="input_image_references"></a> [image\_references](#input\_image\_references) | map with images | <pre>map(object({<br>    image_name   = string<br>    ssh_username = string<br>    worker_os    = string<br>  }))</pre> | <pre>{<br>  "centos": {<br>    "image_name": "centos-7-x64",<br>    "ssh_username": "root",<br>    "worker_os": "centos"<br>  },<br>  "rockylinux": {<br>    "image_name": "rockylinux-8-x64",<br>    "ssh_username": "root",<br>    "worker_os": "rockylinux"<br>  },<br>  "ubuntu": {<br>    "image_name": "ubuntu-24-04-x64",<br>    "ssh_username": "root",<br>    "worker_os": "ubuntu"<br>  }<br>}</pre> | no |
+| <a name="input_image_references"></a> [image\_references](#input\_image\_references) | map with images | <pre>map(object({<br>    image_name   = string<br>    ssh_username = string<br>    worker_os    = string<br>  }))</pre> | <pre>{<br>  "centos": {<br>    "image_name": "centos-7-x64",<br>    "ssh_username": "root",<br>    "worker_os": "centos"<br>  },<br>  "rockylinux": {<br>    "image_name": "rockylinux-9-x64",<br>    "ssh_username": "root",<br>    "worker_os": "rockylinux"<br>  },<br>  "ubuntu": {<br>    "image_name": "ubuntu-24-04-x64",<br>    "ssh_username": "root",<br>    "worker_os": "ubuntu"<br>  }<br>}</pre> | no |
 | <a name="input_initial_machinedeployment_operating_system_profile"></a> [initial\_machinedeployment\_operating\_system\_profile](#input\_initial\_machinedeployment\_operating\_system\_profile) | Name of operating system profile for MachineDeployments, only applicable if operating-system-manager addon is enabled.<br>If not specified, the default value will be added by machine-controller addon. | `string` | `""` | no |
 | <a name="input_initial_machinedeployment_replicas"></a> [initial\_machinedeployment\_replicas](#input\_initial\_machinedeployment\_replicas) | Number of replicas per MachineDeployment | `number` | `2` | no |
 | <a name="input_os"></a> [os](#input\_os) | Operating System to use in image filtering and MachineDeployment | `string` | `"ubuntu"` | no |

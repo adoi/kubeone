@@ -62,7 +62,7 @@ func TestValidateKubeOneCluster(t *testing.T) {
 					External: true,
 				},
 				Versions: kubeoneapi.VersionConfig{
-					Kubernetes: "1.32.0",
+					Kubernetes: "1.34.0",
 				},
 				MachineController: &kubeoneapi.MachineControllerConfig{
 					Deploy: true,
@@ -115,7 +115,7 @@ func TestValidateKubeOneCluster(t *testing.T) {
 					AWS: &kubeoneapi.AWSSpec{},
 				},
 				Versions: kubeoneapi.VersionConfig{
-					Kubernetes: "1.32.0",
+					Kubernetes: "1.34.0",
 				},
 				MachineController: &kubeoneapi.MachineControllerConfig{
 					Deploy: false,
@@ -168,7 +168,7 @@ func TestValidateKubeOneCluster(t *testing.T) {
 					AWS: &kubeoneapi.AWSSpec{},
 				},
 				Versions: kubeoneapi.VersionConfig{
-					Kubernetes: "1.32.0",
+					Kubernetes: "1.34.0",
 				},
 				MachineController: &kubeoneapi.MachineControllerConfig{
 					Deploy: true,
@@ -221,7 +221,7 @@ func TestValidateKubeOneCluster(t *testing.T) {
 					Vsphere: &kubeoneapi.VsphereSpec{},
 				},
 				Versions: kubeoneapi.VersionConfig{
-					Kubernetes: "1.32.0",
+					Kubernetes: "1.34.0",
 				},
 				MachineController: &kubeoneapi.MachineControllerConfig{
 					Deploy: true,
@@ -515,11 +515,17 @@ func TestValidateCloudProviderSpec(t *testing.T) {
 			name: "valid Kubevirt provider config",
 			providerConfig: kubeoneapi.CloudProviderSpec{
 				Kubevirt: &kubeoneapi.KubevirtSpec{
-					InfraClusterKubeconfig: "YXBpVmVyc2lvbjogdjEKY2x1c3RlcnM6Ci0gY2x1c3RlcjoKICAgIGNlcnRpZmljYXRlLWF1dGhvcml0eS1kYXRhOiBMU1hZWgogICAgc2VydmVyOiBodHRwczovL3h5ei5leGFtcGxlLmNvbTo2NDQzCiAgbmFtZTogeHl6CmNvbnRleHRzOgotIGNvbnRleHQ6CiAgICBjbHVzdGVyOiB4eXoKICAgIHVzZXI6IGRlZmF1bHQKICBuYW1lOiB4eXoKY3VycmVudC1jb250ZXh0OiB4eXoKa2luZDogQ29uZmlnCnByZWZlcmVuY2VzOiB7fQp1c2VyczoKLSBuYW1lOiBkZWZhdWx0CiAgdXNlcjoKICAgIHRva2VuOiB4eXphdzI1Lnh5ego=",
-					InfraNamespace:         "tenant-xyz",
+					InfraNamespace: "tenant-xyz",
 				},
 			},
 			expectedError: false,
+		},
+		{
+			name: "Kubevirt provider config missing InfraNamespace",
+			providerConfig: kubeoneapi.CloudProviderSpec{
+				Kubevirt: &kubeoneapi.KubevirtSpec{},
+			},
+			expectedError: true,
 		},
 		{
 			name: "valid Nutanix provider config",
@@ -817,7 +823,7 @@ func TestValidateCloudProviderSpec(t *testing.T) {
 			}
 			errs := ValidateCloudProviderSpec(cluster, nil)
 			if (len(errs) == 0) == tc.expectedError {
-				t.Errorf("test case failed: expected %v, but got %v", tc.expectedError, (len(errs) != 0))
+				t.Errorf("test case failed: expected %v, but got %v, %v", tc.expectedError, (len(errs) != 0), errs)
 			}
 		})
 	}
@@ -830,18 +836,39 @@ func TestValidateVersionConfig(t *testing.T) {
 		expectedError bool
 	}{
 		{
-			name: "valid version config (1.31.0)",
+			name: "valid version config (1.34.0)",
 			versionConfig: kubeoneapi.VersionConfig{
-				Kubernetes: "1.31.0",
+				Kubernetes: "1.34.0",
 			},
 			expectedError: false,
 		},
 		{
-			name: "valid version config (1.30.0)",
+			name: "valid version config (1.33.0)",
+			versionConfig: kubeoneapi.VersionConfig{
+				Kubernetes: "1.33.0",
+			},
+			expectedError: false,
+		},
+		{
+			name: "valid version config (1.32.0)",
+			versionConfig: kubeoneapi.VersionConfig{
+				Kubernetes: "1.32.0",
+			},
+			expectedError: false,
+		},
+		{
+			name: "invalid version config (1.31.0)",
+			versionConfig: kubeoneapi.VersionConfig{
+				Kubernetes: "1.31.0",
+			},
+			expectedError: true,
+		},
+		{
+			name: "invalid version config (1.30.0)",
 			versionConfig: kubeoneapi.VersionConfig{
 				Kubernetes: "1.30.0",
 			},
-			expectedError: false,
+			expectedError: true,
 		},
 		{
 			name: "invalid version config (1.29.0)",
@@ -2080,12 +2107,56 @@ func TestValidateAddons(t *testing.T) {
 			addons:        nil,
 			expectedError: false,
 		},
+		{
+			name: "oci helm release",
+			addons: &kubeoneapi.Addons{
+				Addons: []kubeoneapi.AddonRef{
+					{
+						HelmRelease: &kubeoneapi.HelmRelease{
+							Namespace:   "ns1",
+							ChartURL:    "oci://something.tld/chart:version",
+							ReleaseName: "chart1",
+						},
+					},
+				},
+			},
+			expectedError: false,
+		},
+		{
+			name: "oci helm release without releaseName",
+			addons: &kubeoneapi.Addons{
+				Addons: []kubeoneapi.AddonRef{
+					{
+						HelmRelease: &kubeoneapi.HelmRelease{
+							Namespace: "ns1",
+							ChartURL:  "oci://something.tld/chart:version",
+						},
+					},
+				},
+			},
+			expectedError: true,
+		},
+		{
+			name: "helm release",
+			addons: &kubeoneapi.Addons{
+				Addons: []kubeoneapi.AddonRef{
+					{
+						HelmRelease: &kubeoneapi.HelmRelease{
+							Namespace: "ns1",
+							Chart:     "chart",
+							RepoURL:   "https://repo.localhost/chart-repo",
+						},
+					},
+				},
+			},
+			expectedError: false,
+		},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			errs := ValidateAddons(tc.addons, nil)
 			if (len(errs) == 0) == tc.expectedError {
-				t.Log(errs[0])
+				t.Log(errs)
 				t.Errorf("test case failed: expected %v, but got %v", tc.expectedError, (len(errs) != 0))
 			}
 		})

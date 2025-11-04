@@ -32,9 +32,9 @@ import (
 	"k8c.io/kubeone/pkg/fail"
 	"k8c.io/kubeone/pkg/kubeconfig"
 	"k8c.io/kubeone/pkg/state"
-	clusterv1alpha1 "k8c.io/machine-controller/pkg/apis/cluster/v1alpha1"
-	"k8c.io/machine-controller/pkg/jsonutil"
-	providerconfigtypes "k8c.io/machine-controller/pkg/providerconfig/types"
+	clusterv1alpha1 "k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
+	"k8c.io/machine-controller/sdk/jsonutil"
+	providerconfigtypes "k8c.io/machine-controller/sdk/providerconfig"
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -243,9 +243,10 @@ func safeguardNodeSelectorsAndTolerations(s *state.State) error {
 			}
 			var foundMaster, foundControlPlane bool
 			for _, t := range pod.Spec.Tolerations {
-				if t.Key == nodeRoleMaster {
+				switch t.Key {
+				case nodeRoleMaster:
 					foundMaster = true
-				} else if t.Key == labelControlPlaneNode {
+				case labelControlPlaneNode:
 					foundControlPlane = true
 				}
 			}
@@ -330,7 +331,7 @@ func safeguardFlatcarMachineDeployments(s *state.State) error {
 		s.Logger.Warnf("cloud-init provisioning utility is not supported on Flatcar with Operating System Manager (OSM) enabled.")
 		s.Logger.Warnf("Please migrate your MachineDeployments to \"ignition\" provisioning utility after kubeone apply is done.")
 		s.Logger.Warnf("Not doing so will cause your Machines to never join the cluster.")
-		s.Logger.Warnf("For more details, check out the following document: https://docs.kubermatic.com/kubeone/v1.9/architecture/operating-system-manager/usage/")
+		s.Logger.Warnf("For more details, check out the following document: https://docs.kubermatic.com/kubeone/main/architecture/operating-system-manager/usage/")
 	}
 
 	return nil

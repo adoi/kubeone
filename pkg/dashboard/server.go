@@ -28,7 +28,7 @@ import (
 	"k8c.io/kubeone/pkg/fail"
 	"k8c.io/kubeone/pkg/kubeconfig"
 	"k8c.io/kubeone/pkg/state"
-	clusterv1alpha1 "k8c.io/machine-controller/pkg/apis/cluster/v1alpha1"
+	clusterv1alpha1 "k8c.io/machine-controller/sdk/apis/cluster/v1alpha1"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -165,7 +165,7 @@ func getNodes(s *state.State) (*nodesResult, error) {
 	var result nodesResult
 
 	for _, currNode := range nodes.Items {
-		_, isControlPlane := currNode.ObjectMeta.Labels["node-role.kubernetes.io/control-plane"]
+		_, isControlPlane := currNode.Labels["node-role.kubernetes.io/control-plane"]
 		lastCondition := currNode.Status.Conditions[len(currNode.Status.Conditions)-1]
 
 		aNode := node{
@@ -280,7 +280,7 @@ func getMachines(state *state.State, md *clusterv1alpha1.MachineDeployment) ([]m
 			Kubelet:   currMachine.Spec.Versions.Kubelet,
 			Address:   address,
 			Age:       time.Since(currMachine.CreationTimestamp.Time).Truncate(time.Second),
-			Deleted:   !currMachine.ObjectMeta.DeletionTimestamp.IsZero(),
+			Deleted:   !currMachine.DeletionTimestamp.IsZero(),
 		})
 	}
 

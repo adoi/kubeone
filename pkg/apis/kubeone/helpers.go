@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"net/url"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -35,7 +36,7 @@ const (
 	credentialSecretName = "kube-system/kubeone-registry-credentials" //nolint:gosec
 )
 
-var preV131Constraint = semverutil.MustParseConstraint("< 1.31")
+var postV133Constraint = semverutil.MustParseConstraint(">= 1.33")
 
 // Leader returns the first configured host. Only call this after
 // validating the cluster config to ensure a leader exists.
@@ -108,7 +109,6 @@ func (osName OperatingSystemName) IsValid() bool {
 	case OperatingSystemNameCentOS:
 	case OperatingSystemNameRHEL:
 	case OperatingSystemNameRockyLinux:
-	case OperatingSystemNameAmazon:
 	case OperatingSystemNameFlatcar:
 	case OperatingSystemNameUnknown:
 	default:
@@ -151,6 +151,16 @@ func (crc ContainerRuntimeConfig) MachineControllerFlags() []string {
 		}
 
 		for _, mirror := range containerdRegistry.Mirrors {
+			if containerdRegistry.OverridePath {
+				mirrorURL, _ := url.Parse(mirror)
+				mirrorQS := mirrorURL.Query()
+				kubermaticValues := url.Values{}
+				kubermaticValues.Add("override_path", "true")
+				mirrorQS.Add("kubermatic", kubermaticValues.Encode())
+				mirrorURL.RawPath = mirrorQS.Encode()
+				mirror = mirrorURL.String()
+			}
+
 			mcFlags = append(mcFlags,
 				fmt.Sprintf("-node-containerd-registry-mirrors=%s=%s", registryName, mirror),
 			)
@@ -221,8 +231,8 @@ func (v VersionConfig) SandboxImage(imageRegistry func(string) string) (string, 
 	registry := imageRegistry("registry.k8s.io")
 
 	switch {
-	case preV131Constraint.Check(kubeSemVer):
-		return fmt.Sprintf("%s/pause:3.9", registry), nil
+	case postV133Constraint.Check(kubeSemVer):
+		return fmt.Sprintf("%s/pause:3.10.1", registry), nil
 	default:
 		return fmt.Sprintf("%s/pause:3.10", registry), nil
 	}
@@ -327,7 +337,8 @@ func (c KubeOneCluster) csiMigrationFeatureGates(complete bool) (map[string]bool
 	}
 
 	featureGates := map[string]bool{}
-	if complete {
+
+	if complete && c.canHaveCloudProviderFeatureGates() {
 		featureGates["DisableCloudProviders"] = true
 	}
 
@@ -348,6 +359,15 @@ func (c KubeOneCluster) CSIMigrationFeatureGates(complete bool) (map[string]bool
 	}
 
 	return featureGates, marshalFeatureGates(featureGates), nil
+}
+
+// canHaveCloudProviderFeatureGates returns boolean value to decide whether cloud provider feature gate
+// should be added to kubelet configs
+// for kubernetes 1.33+ we need to skip setting this feature gate because it was removed
+func (c KubeOneCluster) canHaveCloudProviderFeatureGates() bool {
+	currentVersion := semver.MustParse(c.Versions.Kubernetes)
+
+	return !postV133Constraint.Check(currentVersion)
 }
 
 func marshalFeatureGates(fgm map[string]bool) string {

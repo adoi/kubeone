@@ -111,6 +111,13 @@ kubectl annotate machinedeployment -n kube-system <machinedeployment-name> capac
 kubectl annotate machinedeployment -n kube-system <machinedeployment-name> capacity.cluster-autoscaler.kubernetes.io/cpu=2
 ```
 
+
+## Development
+
+```shell
+kubectl kustomize --enable-helm . | yq > cluster-autoscaler.yaml
+```
+
 ## Using The Addon
 
 You need to replace the following values with the actual ones:
@@ -131,6 +138,10 @@ You need to replace the following values with the actual ones:
   * Possible values are `"true"` or `"false"`.
   * Default is `"false"`, as described in the [FAQ][autoscaler-faq].
   * Set the value to `"true"`, if you are facing issue similar to the one described over [here][balance-similar-node-groups] in the [FAQ][autoscaler-faq].
+* `CLUSTER_AUTOSCALER_SCALE_DOWN_UTIL_THRESHOLD` can be used to define the value of `--scale-down-utilization-threshold=`.
+  * Possible values range from 0 to 1.
+  * Default is `0.5`, as described in the [FAQ][autoscaler-faq]. This means, any node with utilization (CPU/RAM) below 50% will be scaled down.
+  * Set the value to higher than `0.5`, if you want more aggressive scale downs.
 
 You can find more information about deploying addons in the
 [Addons document][using-addons].
@@ -138,11 +149,11 @@ You can find more information about deploying addons in the
 [addon]: ./cluster-autoscaler.yaml
 [autoscaler]: https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler
 [machine-controller]: https://github.com/kubermatic/machine-controller
-[docs-concepts]: https://docs.kubermatic.com/kubeone/v1.9/architecture/concepts/
-[docs-machinedeployment]: https://docs.kubermatic.com/kubeone/v1.9/architecture/concepts/#machinedeployments
+[docs-concepts]: https://docs.kubermatic.com/kubeone/main/architecture/concepts/
+[docs-machinedeployment]: https://docs.kubermatic.com/kubeone/main/architecture/concepts/#machinedeployments
 [recommended-autoscaler-versions]: https://github.com/kubernetes/autoscaler/tree/master/cluster-autoscaler#releases
 [autoscaler-releases]: https://github.com/kubernetes/autoscaler/releases
-[using-addons]: https://docs.kubermatic.com/kubeone/v1.9/guides/addons/
+[using-addons]: https://docs.kubermatic.com/kubeone/main/guides/addons/
 [autoscaler-faq]: https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md
 [enforce-node-group-min-size]: https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#my-cluster-is-below-minimum--above-maximum-number-of-nodes-but-ca-did-not-fix-that-why
 [balance-similar-node-groups]: https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/FAQ.md#im-running-cluster-with-nodes-in-multiple-zones-for-ha-purposes-is-that-supported-by-cluster-autoscaler

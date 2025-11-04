@@ -19,7 +19,6 @@ package validation
 import (
 	"bytes"
 	"crypto/x509"
-	"encoding/base64"
 	"fmt"
 	"net"
 	"os"
@@ -38,11 +37,18 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+const (
+	// MinimumSupportedVersion defines the minimum Kubernetes version supported by KubeOne.
+	MinimumSupportedVersion = "1.32"
+	// MaximumSupportedVersion defines the maximum Kubernetes version supported by KubeOne.
+	MaximumSupportedVersion = "1.34"
+)
+
 var (
 	// minVersionConstraint defines the minimum Kubernetes version supported by KubeOne
-	minVersionConstraint = semverutil.MustParseConstraint(">= 1.30")
+	minVersionConstraint = semverutil.MustParseConstraint(fmt.Sprintf(">= %s", MinimumSupportedVersion))
 	// maxVersionConstraint defines the maximum Kubernetes version supported by KubeOne
-	maxVersionConstraint = semverutil.MustParseConstraint("<= 1.32")
+	maxVersionConstraint = semverutil.MustParseConstraint(fmt.Sprintf("<= %s", MaximumSupportedVersion))
 )
 
 // ValidateKubeOneCluster validates the KubeOneCluster object
@@ -51,6 +57,7 @@ func ValidateKubeOneCluster(c kubeoneapi.KubeOneCluster) field.ErrorList {
 
 	allErrs = append(allErrs, ValidateName(c.Name, field.NewPath("name"))...)
 	allErrs = append(allErrs, ValidateControlPlaneConfig(c.ControlPlane, c.ClusterNetwork, field.NewPath("controlPlane"))...)
+	allErrs = append(allErrs, ValidateKubeletConfig(c.KubeletConfig, field.NewPath("kubeletConfig"))...)
 	allErrs = append(allErrs, ValidateAPIEndpoint(c.APIEndpoint, field.NewPath("apiEndpoint"))...)
 	allErrs = append(allErrs, ValidateCloudProviderSpec(c, field.NewPath("provider"))...)
 	allErrs = append(allErrs, ValidateVersionConfig(c.Versions, field.NewPath("versions"))...)
@@ -70,7 +77,8 @@ func ValidateKubeOneCluster(c kubeoneapi.KubeOneCluster) field.ErrorList {
 		allErrs = append(allErrs, ValidateOperatingSystemManager(c.MachineController, field.NewPath("operatingSystemManager"))...)
 	}
 
-	allErrs = append(allErrs, ValidateCABundle(c.CABundle, field.NewPath("caBundle"))...)
+	allErrs = append(allErrs, ValidateCABundle(c.CABundle, field.NewPath("bundle"))...)
+	allErrs = append(allErrs, ValidateCABundle(c.CertificateAuthority.Bundle, field.NewPath("certificateAuthority", "bundle"))...)
 	allErrs = append(allErrs, ValidateFeatures(c.Features, field.NewPath("features"))...)
 	allErrs = append(allErrs, ValidateAddons(c.Addons, field.NewPath("addons"))...)
 	allErrs = append(allErrs, ValidateRegistryConfiguration(c.RegistryConfiguration, field.NewPath("registryConfiguration"))...)
@@ -204,18 +212,13 @@ func ValidateCloudProviderSpec(cluster kubeoneapi.KubeOneCluster, fldPath *field
 		providerFound = true
 	}
 	if providerSpec.Kubevirt != nil {
+		kubevirtFld := fldPath.Child("kubevirt")
 		if providerFound {
-			allErrs = append(allErrs, field.Forbidden(fldPath.Child("kubevirt"), "only one provider can be used at the same time"))
+			allErrs = append(allErrs, field.Forbidden(kubevirtFld, "only one provider can be used at the same time"))
 		}
 		providerFound = true
-		if providerSpec.External {
-			allErrs = append(allErrs, field.Forbidden(fldPath.Child("external"), "external cloud provider is not supported for Kubevirt clusters"))
-		}
-		if providerSpec.Kubevirt.InfraClusterKubeconfig != "" {
-			_, err := base64.StdEncoding.DecodeString(providerSpec.Kubevirt.InfraClusterKubeconfig)
-			if err != nil {
-				allErrs = append(allErrs, field.Forbidden(fldPath.Child("kubevirt").Child("infraClusterKubeconfig"), "infraClusterKubeconfig must be base64-encoded"))
-			}
+		if providerSpec.Kubevirt.InfraNamespace == "" {
+			allErrs = append(allErrs, field.Required(kubevirtFld.Child("infraNamespace"), "is required for kubevirt provider"))
 		}
 	}
 	if providerSpec.Nutanix != nil {
@@ -407,7 +410,7 @@ func validateIPFamily(ipFamily kubeoneapi.IPFamily, prov kubeoneapi.CloudProvide
 		allErrs = append(allErrs, field.Forbidden(fldPath, "ipv6 and ipv6+ipv4 ip families are currently not supported"))
 	}
 
-	if ipFamily == kubeoneapi.IPFamilyIPv4IPv6 && !(prov.AWS != nil || prov.None != nil || prov.Vsphere != nil) {
+	if ipFamily == kubeoneapi.IPFamilyIPv4IPv6 && prov.AWS == nil && prov.None == nil && prov.Vsphere == nil {
 		allErrs = append(allErrs, field.Forbidden(fldPath, "dualstack is currently supported only on AWS, vSphere and baremetal (none)"))
 	}
 
@@ -731,8 +734,9 @@ func ValidateAddons(o *kubeoneapi.Addons, fldPath *field.Path) field.ErrorList {
 func validateHelmReleases(helmReleases []kubeoneapi.HelmRelease, fldPath *field.Path) field.ErrorList {
 	allErrs := field.ErrorList{}
 
-	for _, hr := range helmReleases {
-		if hr.Chart == "" {
+	for i, hr := range helmReleases {
+		fldPath := fldPath.Index(i) //nolint:govet
+		if hr.Chart == "" && hr.ChartURL == "" {
 			allErrs = append(allErrs, field.Required(fldPath.Child("chart"), hr.Chart))
 		}
 
@@ -740,11 +744,15 @@ func validateHelmReleases(helmReleases []kubeoneapi.HelmRelease, fldPath *field.
 			allErrs = append(allErrs, field.Required(fldPath.Child("namespace"), hr.Namespace))
 		}
 
-		if hr.RepoURL == "" {
+		if hr.RepoURL == "" && hr.ChartURL == "" {
 			_, err := helm.GetChartNameFromChartYAML(hr.Chart)
 			if err != nil {
 				allErrs = append(allErrs, field.Invalid(fldPath.Child("chart"), hr.Chart, fmt.Sprintf("invalid local chart: %v", err)))
 			}
+		}
+
+		if hr.ChartURL != "" && hr.ReleaseName == "" {
+			allErrs = append(allErrs, field.Required(fldPath.Child("releaseName"), "since chartURL is given directly, releaseName is required"))
 		}
 
 		for idx, helmValues := range hr.Values {
@@ -786,46 +794,53 @@ func ValidateHostConfig(hosts []kubeoneapi.HostConfig, clusterNetwork kubeoneapi
 	allErrs := field.ErrorList{}
 
 	leaderFound := false
-	for _, host := range hosts {
+	for idx, host := range hosts {
+		hostFldPath := fldPath.Index(idx)
+
 		if leaderFound && host.IsLeader {
-			allErrs = append(allErrs, field.Invalid(fldPath, host.IsLeader, "only one leader is allowed"))
+			allErrs = append(allErrs, field.Invalid(hostFldPath.Child("isLeader"), host.IsLeader, "only one leader is allowed"))
 		}
 		if host.IsLeader {
 			leaderFound = true
 		}
 		if len(host.PublicAddress) == 0 {
-			allErrs = append(allErrs, field.Required(fldPath, "no public IP/address given"))
+			allErrs = append(allErrs, field.Required(hostFldPath.Child("publicAddress"), "no public IP/address given"))
 		}
-
 		if (clusterNetwork.IPFamily == kubeoneapi.IPFamilyIPv6 || clusterNetwork.IPFamily == kubeoneapi.IPFamilyIPv4IPv6 || clusterNetwork.IPFamily == kubeoneapi.IPFamilyIPv6IPv4) && len(host.IPv6Addresses) == 0 {
-			allErrs = append(allErrs, field.Required(fldPath, "no IPv6 address given"))
+			allErrs = append(allErrs, field.Required(hostFldPath.Child("ipFamily"), "no IPv6 address given"))
 		}
 		if len(host.PrivateAddress) == 0 {
-			allErrs = append(allErrs, field.Required(fldPath, "no private IP/address givevn"))
+			allErrs = append(allErrs, field.Required(hostFldPath.Child("privateAddress"), "no private IP/address givevn"))
 		}
 		if len(host.SSHPrivateKeyFile) == 0 && len(host.SSHAgentSocket) == 0 {
-			allErrs = append(allErrs, field.Invalid(fldPath, host.SSHPrivateKeyFile, "neither SSH private key nor agent socket given, don't know how to authenticate"))
-			allErrs = append(allErrs, field.Invalid(fldPath, host.SSHAgentSocket, "neither SSH private key nor agent socket given, don't know how to authenticate"))
+			allErrs = append(allErrs, field.Invalid(hostFldPath.Child("sshPrivateKeyFile"), host.SSHPrivateKeyFile, "neither SSH private key nor agent socket given, don't know how to authenticate"))
+			allErrs = append(allErrs, field.Invalid(hostFldPath.Child("sshAgentSocket"), host.SSHAgentSocket, "neither SSH private key nor agent socket given, don't know how to authenticate"))
 		}
 		if len(host.SSHUsername) == 0 {
-			allErrs = append(allErrs, field.Required(fldPath, "no SSH username given"))
+			allErrs = append(allErrs, field.Required(hostFldPath.Child("sshUsername"), "no SSH username given"))
 		}
 		if !host.OperatingSystem.IsValid() {
-			allErrs = append(allErrs, field.Invalid(fldPath.Child("operatingSystem"), host.OperatingSystem, "invalid operatingSystem provided"))
+			allErrs = append(allErrs, field.Invalid(hostFldPath.Child("operatingSystem"), host.OperatingSystem, "invalid operatingSystem provided"))
 		}
-		if host.Kubelet.MaxPods != nil && *host.Kubelet.MaxPods <= 0 {
-			allErrs = append(allErrs, field.Invalid(fldPath.Child("kubelet").Child("maxPods"), host.Kubelet.MaxPods, "maxPods must be a positive number"))
-		}
-		for labelKey, labelValue := range host.Labels {
-			if strings.HasSuffix(labelKey, "-") && labelValue != "" {
-				allErrs = append(allErrs, field.Invalid(fldPath.Child("labels"), labelValue, "label to remove cannot have value"))
-			}
-		}
-
+		allErrs = append(allErrs, ValidateKubeletConfig(host.Kubelet, hostFldPath.Child("kubelet"))...)
+		allErrs = append(allErrs, validateLabels(host.Annotations, hostFldPath.Child("annotations"))...)
+		allErrs = append(allErrs, validateLabels(host.Labels, hostFldPath.Child("labels"))...)
 		for _, taint := range host.Taints {
 			if taint.Key == "node-role.kubernetes.io/master" {
-				allErrs = append(allErrs, field.Forbidden(fldPath.Child("taints"), fmt.Sprintf("%q taint is forbidden for clusters running Kubernetes 1.25+", "node-role.kubernetes.io/master")))
+				allErrs = append(allErrs, field.Forbidden(hostFldPath.Child("taints"), fmt.Sprintf("%q taint is forbidden for clusters running Kubernetes 1.25+", "node-role.kubernetes.io/master")))
 			}
+		}
+	}
+
+	return allErrs
+}
+
+func validateLabels(kv map[string]string, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	for labelKey, labelValue := range kv {
+		if strings.HasSuffix(labelKey, "-") && labelValue != "" {
+			allErrs = append(allErrs, field.Invalid(fldPath, labelValue, "key to remove cannot have value"))
 		}
 	}
 
@@ -911,6 +926,22 @@ func ValidateOperatingSystemManager(mc *kubeoneapi.MachineControllerConfig, fldP
 
 	if mc == nil || !mc.Deploy {
 		allErrs = append(allErrs, field.Invalid(fldPath, "", "machineController needs to be enabled to use operatingSystemManager"))
+	}
+
+	return allErrs
+}
+
+func ValidateKubeletConfig(klcfg kubeoneapi.KubeletConfig, fldPath *field.Path) field.ErrorList {
+	allErrs := field.ErrorList{}
+
+	if klcfg.MaxPods != nil && *klcfg.MaxPods <= 0 {
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("maxPods"), klcfg.MaxPods, "maxPods must be a positive number"))
+	}
+	if v := klcfg.ImageGCHighThresholdPercent; v != nil && (*v < 0 || *v > 100) {
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("imageGCHighThresholdPercent"), *v, "must be between 0 and 100, inclusive"))
+	}
+	if v := klcfg.ImageGCLowThresholdPercent; v != nil && (*v < 0 || *v > 100) {
+		allErrs = append(allErrs, field.Invalid(fldPath.Child("imageGCLowThresholdPercent"), *v, "must be between 0 and 100, inclusive"))
 	}
 
 	return allErrs

@@ -24,6 +24,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Masterminds/semver/v3"
+
 	bootstraptokenv1 "k8c.io/kubeone/pkg/apis/kubeadm/bootstraptoken/v1"
 	kubeadmv1beta4 "k8c.io/kubeone/pkg/apis/kubeadm/v1beta4"
 	kubeoneapi "k8c.io/kubeone/pkg/apis/kubeone"
@@ -57,6 +59,10 @@ type Config struct {
 // NewConfig returns all required configs to init a cluster via a set of v1beta4 configs
 func NewConfig(s *state.State, host kubeoneapi.HostConfig) (*Config, error) {
 	cluster := s.Cluster
+	kubeSemVer, err := semver.NewVersion(cluster.Versions.Kubernetes)
+	if err != nil {
+		return nil, fail.Config(err, "parsing kubernetes semver")
+	}
 
 	overwriteRegistry := ""
 	if cluster.RegistryConfiguration != nil {
@@ -92,15 +98,17 @@ func NewConfig(s *state.State, host kubeoneapi.HostConfig) (*Config, error) {
 			APIVersion: "kubeadm.k8s.io/v1beta4",
 			Kind:       "ClusterConfiguration",
 		},
-		ClusterName:          cluster.Name,
-		KubernetesVersion:    cluster.Versions.Kubernetes,
-		ControlPlaneEndpoint: controlPlaneEndpoint,
+		ClusterName:                 cluster.Name,
+		CertificateValidityPeriod:   cluster.CertificateAuthority.CertificateValidityPeriod,
+		CACertificateValidityPeriod: cluster.CertificateAuthority.CACertificateValidityPeriod,
+		KubernetesVersion:           cluster.Versions.Kubernetes,
+		ControlPlaneEndpoint:        controlPlaneEndpoint,
 		APIServer: kubeadmv1beta4.APIServer{
 			ControlPlaneComponent: kubeadmv1beta4.ControlPlaneComponent{
 				ExtraArgs: []kubeadmv1beta4.Arg{
 					{
 						Name:  "enable-admission-plugins",
-						Value: kubeflags.DefaultAdmissionControllers(),
+						Value: kubeflags.DefaultAdmissionControllers(kubeSemVer),
 					},
 					{
 						Name:  "endpoint-reconciler-type",
@@ -241,10 +249,6 @@ func etcdVersionCorruptCheckExtraArgs(cipherSuites []string) []kubeadmv1beta4.Ar
 	etcdExtraArgs := []kubeadmv1beta4.Arg{
 		{
 			Name:  "experimental-compact-hash-check-enabled",
-			Value: "true",
-		},
-		{
-			Name:  "experimental-initial-corrupt-check",
 			Value: "true",
 		},
 		{
@@ -499,10 +503,11 @@ func newNodeRegistration(s *state.State, host kubeoneapi.HostConfig) kubeadmv1be
 	//   - when IPv6 Dualstack is disabled
 	if s.Cluster.ClusterNetwork.IPFamily.IsDualstack() {
 		if !s.Cluster.CloudProvider.External {
-			switch {
-			case s.Cluster.ClusterNetwork.IPFamily == kubeoneapi.IPFamilyIPv4IPv6:
+			//nolint:exhaustive
+			switch s.Cluster.ClusterNetwork.IPFamily {
+			case kubeoneapi.IPFamilyIPv4IPv6:
 				kubeletCLIFlags = setAllArgsValue(kubeletCLIFlags, "node-ip", newNodeIP(host)+","+host.IPv6Addresses[0])
-			case s.Cluster.ClusterNetwork.IPFamily == kubeoneapi.IPFamilyIPv6IPv4:
+			case kubeoneapi.IPFamilyIPv6IPv4:
 				kubeletCLIFlags = setAllArgsValue(kubeletCLIFlags, "node-ip", host.IPv6Addresses[0]+","+newNodeIP(host))
 			}
 		}
@@ -532,6 +537,20 @@ func newNodeRegistration(s *state.State, host kubeoneapi.HostConfig) kubeadmv1be
 		// in order to pass the 4.2.13 Check in CIS Benchmark 1.8
 		kubeletCLIFlags = setAllArgsValue(kubeletCLIFlags, "pod-max-pids", strconv.Itoa(-1))
 	}
+
+	if m := host.Kubelet.ImageGCHighThresholdPercent; m != nil {
+		kubeletCLIFlags = setAllArgsValue(kubeletCLIFlags, "image-gc-high-threshold", strconv.Itoa(int(*m)))
+	}
+
+	if m := host.Kubelet.ImageGCLowThresholdPercent; m != nil {
+		kubeletCLIFlags = setAllArgsValue(kubeletCLIFlags, "image-gc-low-threshold", strconv.Itoa(int(*m)))
+	}
+
+	if m := host.Kubelet.ImageMinimumGCAge.Duration; m != 0 {
+		kubeletCLIFlags = setAllArgsValue(kubeletCLIFlags, "minimum-image-ttl-duration", m.String())
+	}
+
+	// unfortunately there is no CLI flag for ImageMaximumGCAge
 
 	return kubeadmv1beta4.NodeRegistrationOptions{
 		Name:             host.Hostname,
@@ -614,9 +633,10 @@ func splitFeatureGates(featureGates string) map[string]bool {
 		if len(kv) == 2 {
 			key := strings.TrimSpace(kv[0])
 			value := strings.TrimSpace(kv[1])
-			if value == "true" {
+			switch value {
+			case "true":
 				featureGatesMap[key] = true
-			} else if value == "false" {
+			case "false":
 				featureGatesMap[key] = false
 			}
 		}

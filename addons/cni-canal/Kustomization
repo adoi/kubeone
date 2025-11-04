@@ -3,7 +3,7 @@ kind: Kustomization
 namespace: kube-system
 
 resources:
-  - https://raw.githubusercontent.com/projectcalico/calico/v3.29.2/manifests/canal.yaml
+  - https://raw.githubusercontent.com/projectcalico/calico/v3.30.3/manifests/canal.yaml
 
 patches:
   - patch: |-
@@ -91,27 +91,12 @@ patches:
                         key: canal_iface_regex
                         name: canal-config
                   - name: FLANNELD_IFACE
-                    $patch: delete
+                    valueFrom:
+                      configMapKeyRef:
+                        key: canal_iface
+                        name: canal-config
             initContainers:
               - name: install-cni
                 image: '{{ .InternalImages.Get "CalicoCNI" }}'
               - name: mount-bpffs
                 image: '{{ .InternalImages.Get "CalicoNode" }}'
-
-  - patch: |-
-      apiVersion: apps/v1
-      kind: DaemonSet
-      metadata:
-        name: canal
-        namespace: kube-system
-      spec:
-        template:
-          spec:
-            containers:
-              - name: calico-node
-              - name: kube-flannel
-                env:
-                  - name: FLANNELD_IFACE
-                    valueFrom:
-                      fieldRef:
-                        fieldPath: status.hostIP

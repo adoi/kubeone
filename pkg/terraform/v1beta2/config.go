@@ -29,6 +29,7 @@ import (
 	"k8c.io/kubeone/pkg/templates/machinecontroller"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // Config represents configuration in the terraform output format
@@ -86,30 +87,36 @@ type controlPlane struct {
 }
 
 type hostsSpec struct {
-	PublicAddress     []string          `json:"public_address"`
-	IPv6Addresses     [][]string        `json:"ipv6_addresses"`
-	PrivateAddress    []string          `json:"private_address"`
-	Hostnames         []string          `json:"hostnames"`
-	OperatingSystem   string            `json:"operating_system"`
-	SSHUser           string            `json:"ssh_user"`
-	SSHPort           int               `json:"ssh_port"`
-	SSHPrivateKeyFile string            `json:"ssh_private_key_file"`
-	SSHCertFile       string            `json:"ssh_cert_file"`
-	SSHAgentSocket    string            `json:"ssh_agent_socket"`
-	SSHHostKeys       [][]byte          `json:"ssh_hosts_keys"`
-	Bastion           string            `json:"bastion"`
-	BastionPort       int               `json:"bastion_port"`
-	BastionUser       string            `json:"bastion_user"`
-	BastionHostKey    []byte            `json:"bastion_host_key"`
-	Kubelet           kubeletSpec       `json:"kubelet,omitempty"`
-	Labels            map[string]string `json:"labels"`
+	PublicAddress         []string          `json:"public_address"`
+	IPv6Addresses         [][]string        `json:"ipv6_addresses"`
+	PrivateAddress        []string          `json:"private_address"`
+	Hostnames             []string          `json:"hostnames"`
+	OperatingSystem       string            `json:"operating_system"`
+	SSHUser               string            `json:"ssh_user"`
+	SSHPort               int               `json:"ssh_port"`
+	SSHPrivateKeyFile     string            `json:"ssh_private_key_file"`
+	SSHCertFile           string            `json:"ssh_cert_file"`
+	SSHAgentSocket        string            `json:"ssh_agent_socket"`
+	SSHHostKeys           [][]byte          `json:"ssh_hosts_keys"`
+	Bastion               string            `json:"bastion"`
+	BastionPort           int               `json:"bastion_port"`
+	BastionUser           string            `json:"bastion_user"`
+	BastionHostKey        []byte            `json:"bastion_host_key"`
+	BastionPrivateKeyFile string            `json:"bastion_private_key_file"`
+	Kubelet               kubeletSpec       `json:"kubelet,omitempty"`
+	Labels                map[string]string `json:"labels"`
+	Annotations           map[string]string `json:"annotations"`
 }
 
 type kubeletSpec struct {
-	SystemReserved string `json:"system_reserved"`
-	KubeReserved   string `json:"kube_reserved"`
-	EvictionHard   string `json:"eviction_hard"`
-	MaxPods        *int32 `json:"max_pods,omitempty"`
+	SystemReserved              string          `json:"system_reserved"`
+	KubeReserved                string          `json:"kube_reserved"`
+	EvictionHard                string          `json:"eviction_hard"`
+	MaxPods                     *int32          `json:"max_pods,omitempty"`
+	ImageGCHighThresholdPercent *int32          `json:"image_gc_high_threshold_percent,omitempty"`
+	ImageGCLowThresholdPercent  *int32          `json:"image_gc_low_threshold_percent,omitempty"`
+	ImageMinimumGCAge           metav1.Duration `json:"image_minimum_gc_age,omitempty"`
+	ImageMaximumGCAge           metav1.Duration `json:"image_maximum_gc_age,omitempty"`
 }
 
 type hostConfigsOpts func([]kubeonev1beta2.HostConfig)
@@ -243,7 +250,7 @@ func (output *Config) Apply(cluster *kubeonev1beta2.KubeOneCluster) error { //no
 	untainer := untainerHostConfigsOpts(cp.Untaint)
 
 	// build up a list of master nodes
-	cpHosts := cp.hostsSpec.toHostConfigs(idIncrementer, isLeader, untainer)
+	cpHosts := cp.toHostConfigs(idIncrementer, isLeader, untainer)
 
 	if len(cpHosts) > 0 {
 		cluster.ControlPlane.Hosts = cpHosts
@@ -355,22 +362,24 @@ func newHostConfig(publicIP, privateIP string, ipv6addr []string, idx int, spec 
 	}
 
 	hostConfig := kubeonev1beta2.HostConfig{
-		Bastion:              spec.Bastion,
-		BastionPort:          spec.BastionPort,
-		BastionUser:          spec.BastionUser,
-		BastionHostPublicKey: spec.BastionHostKey,
-		Hostname:             hostname,
-		OperatingSystem:      kubeonev1beta2.OperatingSystemName(spec.OperatingSystem),
-		PrivateAddress:       privateIP,
-		PublicAddress:        publicIP,
-		IPv6Addresses:        ipv6addr,
-		SSHAgentSocket:       spec.SSHAgentSocket,
-		SSHPrivateKeyFile:    spec.SSHPrivateKeyFile,
-		SSHCertFile:          spec.SSHCertFile,
-		SSHUsername:          spec.SSHUser,
-		SSHPort:              spec.SSHPort,
-		Kubelet:              kubeonev1beta2.KubeletConfig{},
-		Labels:               spec.Labels,
+		Bastion:               spec.Bastion,
+		BastionPort:           spec.BastionPort,
+		BastionUser:           spec.BastionUser,
+		BastionHostPublicKey:  spec.BastionHostKey,
+		BastionPrivateKeyFile: spec.BastionPrivateKeyFile,
+		Hostname:              hostname,
+		OperatingSystem:       kubeonev1beta2.OperatingSystemName(spec.OperatingSystem),
+		PrivateAddress:        privateIP,
+		PublicAddress:         publicIP,
+		IPv6Addresses:         ipv6addr,
+		SSHAgentSocket:        spec.SSHAgentSocket,
+		SSHPrivateKeyFile:     spec.SSHPrivateKeyFile,
+		SSHCertFile:           spec.SSHCertFile,
+		SSHUsername:           spec.SSHUser,
+		SSHPort:               spec.SSHPort,
+		Kubelet:               kubeonev1beta2.KubeletConfig{},
+		Labels:                spec.Labels,
+		Annotations:           spec.Annotations,
 	}
 
 	if idx < len(spec.SSHHostKeys) {
@@ -454,7 +463,7 @@ func setWorkersetFlag(w *kubeonev1beta2.DynamicWorkerConfig, name string, value 
 func parseKubeletResourceParams(ks kubeletSpec, kc *kubeonev1beta2.KubeletConfig) {
 	if len(ks.KubeReserved) > 0 {
 		kc.KubeReserved = map[string]string{}
-		for _, krPair := range strings.Split(ks.KubeReserved, ",") {
+		for krPair := range strings.SplitSeq(ks.KubeReserved, ",") {
 			krKV := strings.SplitN(krPair, "=", 2)
 			if len(krKV) != 2 {
 				continue
@@ -465,7 +474,7 @@ func parseKubeletResourceParams(ks kubeletSpec, kc *kubeonev1beta2.KubeletConfig
 
 	if len(ks.SystemReserved) > 0 {
 		kc.SystemReserved = map[string]string{}
-		for _, srPair := range strings.Split(ks.SystemReserved, ",") {
+		for srPair := range strings.SplitSeq(ks.SystemReserved, ",") {
 			srKV := strings.SplitN(srPair, "=", 2)
 			if len(srKV) != 2 {
 				continue
@@ -476,7 +485,7 @@ func parseKubeletResourceParams(ks kubeletSpec, kc *kubeonev1beta2.KubeletConfig
 
 	if len(ks.EvictionHard) > 0 {
 		kc.EvictionHard = map[string]string{}
-		for _, ehPair := range strings.Split(ks.EvictionHard, ",") {
+		for ehPair := range strings.SplitSeq(ks.EvictionHard, ",") {
 			ehKV := strings.SplitN(ehPair, "<", 2)
 			if len(ehKV) != 2 {
 				continue
@@ -486,4 +495,8 @@ func parseKubeletResourceParams(ks kubeletSpec, kc *kubeonev1beta2.KubeletConfig
 	}
 
 	kc.MaxPods = ks.MaxPods
+	kc.ImageGCHighThresholdPercent = ks.ImageGCHighThresholdPercent
+	kc.ImageGCLowThresholdPercent = ks.ImageGCLowThresholdPercent
+	kc.ImageMaximumGCAge = ks.ImageMaximumGCAge
+	kc.ImageMinimumGCAge = ks.ImageMinimumGCAge
 }

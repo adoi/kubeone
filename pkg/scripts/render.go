@@ -53,7 +53,7 @@ var containerRuntimeTemplates = map[string]string{
 	"apt-containerd": heredoc.Docf(`
 			{{ if .CONFIGURE_REPOSITORIES }}
 			sudo apt-get update
-			sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common lsb-release
+			sudo apt-get install -y apt-transport-https ca-certificates curl lsb-release
 			sudo install -m 0755 -d /etc/apt/keyrings
 			sudo rm -f /etc/apt/keyrings/docker.gpg
 			curl -fsSL https://download.docker.com/linux/$(lsb_release -si | tr '[:upper:]' '[:lower:]')/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
@@ -89,17 +89,6 @@ var containerRuntimeTemplates = map[string]string{
 			sudo yum versionlock delete containerd.io || true
 			sudo yum install -y containerd.io-%s
 			sudo yum versionlock add containerd.io
-
-			{{ template "container-runtime-daemon-config" . }}
-			{{ template "containerd-systemd-setup" . -}}
-			`,
-		defaultContainerdVersion,
-	),
-
-	"yum-containerd-amzn": heredoc.Docf(`
-			sudo yum versionlock delete containerd || true
-			sudo yum install -y containerd-%s
-			sudo yum versionlock add containerd
 
 			{{ template "container-runtime-daemon-config" . }}
 			{{ template "containerd-systemd-setup" . -}}

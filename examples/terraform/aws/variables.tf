@@ -38,7 +38,6 @@ variable "worker_os" {
   # * centos
   # * flatcar
   # * rhel
-  # * amzn2
   # * rockylinux
   default = ""
   type    = string
@@ -96,6 +95,12 @@ variable "bastion_host_key" {
   description = "Bastion SSH host public key"
   default     = null
   type        = string
+}
+
+variable "bastion_private_key_file" {
+  description = "SSH private key file used to access bastion"
+  default = ""
+  type = string
 }
 
 variable "control_plane_labels" {
@@ -166,7 +171,6 @@ variable "os" {
   # * centos
   # * rhel
   # * flatcar
-  # * amzn
   # * rockylinux
   default = "ubuntu"
   type    = string
@@ -210,23 +214,16 @@ variable "ami_filters" {
 
     rhel = {
       owners       = ["309956199498"] # Red Hat
-      image_name   = ["RHEL-8*_HVM-*-x86_64-*"]
+      image_name   = ["RHEL-9*_HVM-*-x86_64-*"]
       ssh_username = "ec2-user"
       worker_os    = "rhel"
     }
 
     rockylinux = {
       owners       = ["792107900819"] # RockyLinux
-      image_name   = ["Rocky-8-EC2-*.x86_64"]
+      image_name   = ["Rocky-9-EC2-*.x86_64"]
       ssh_username = "rocky"
       worker_os    = "rockylinux"
-    }
-
-    amzn = {
-      owners       = ["137112412989"] # Amazon
-      image_name   = ["amzn2-ami-hvm-2.0.*-x86_64-gp2"]
-      ssh_username = "ec2-user"
-      worker_os    = "amzn2"
     }
   }
 }

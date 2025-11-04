@@ -17,6 +17,8 @@ limitations under the License.
 package tasks
 
 import (
+	"time"
+
 	"github.com/Masterminds/semver/v3"
 	"github.com/pkg/errors"
 
@@ -174,7 +176,7 @@ func WithFullInstall(t Tasks) Tasks {
 			{Fn: kubeconfig.BuildKubernetesClientset, Operation: "building kubernetes clientset"},
 			{
 				Fn: func(s *state.State) error {
-					return s.RunTaskOnLeader(approvePendingCSR)
+					return s.RunTaskOnLeader(ApprovePendingCSR)
 				},
 				Operation: "approving leader's kubelet CSR",
 			},
@@ -202,7 +204,7 @@ func WithFullInstall(t Tasks) Tasks {
 						return err
 					}
 
-					return s.RunTaskOnAllNodes(approvePendingCSR, true)
+					return s.RunTaskOnAllNodes(ApprovePendingCSR, true)
 				},
 				Operation: "removing old and approving new kubelet CSRs",
 				Predicate: func(s *state.State) bool { return s.Cluster.CloudProvider.External },
@@ -284,6 +286,11 @@ func WithResources(t Tasks) Tasks {
 				Description: "labeling control-plane nodes",
 			},
 			{
+				Fn:          annotateNodes,
+				Operation:   "annotating control-plane nodes",
+				Description: "annotating control-plane nodes",
+			},
+			{
 				Fn:          cleanupStaleObjects,
 				Operation:   "cleaning up any leftovers from addons",
 				Description: "clean up any leftovers from addons",
@@ -325,6 +332,11 @@ func WithResources(t Tasks) Tasks {
 				Fn:          labelNodes,
 				Operation:   "labeling nodes",
 				Description: "labeling nodes",
+			},
+			{
+				Fn:          annotateNodes,
+				Operation:   "annotating nodes",
+				Description: "annotating nodes",
 			},
 			{
 				Fn:        fixFilePermissions,
@@ -400,11 +412,29 @@ func WithUpgrade(t Tasks, followers ...kubeoneapi.HostConfig) Tasks {
 				Description: "delete unused container images",
 				Predicate:   func(s *state.State) bool { return s.PruneImages },
 			},
+			Task{
+				Fn:          cleanupKubernetesTmp,
+				Operation:   "cleanup /etc/kubernetes/tmp",
+				Description: "delete temporary files from /etc/kubernetes/tmp",
+			},
 		)
 }
 
 func WithReset(t Tasks) Tasks {
 	return t.append(Tasks{
+		{
+			Fn:        RemoveLBServices,
+			Operation: "remove load balancer services",
+			Predicate: func(s *state.State) bool {
+				return s.RemoveLBServices
+			}},
+		{
+			Fn:        RemoveVolumes,
+			Operation: "remove dynamically provisioned and unretained volumes",
+			Predicate: func(s *state.State) bool {
+				return s.RemoveVolumes
+			},
+		},
 		{Fn: destroyWorkers, Operation: "destroying workers"},
 		{Fn: resetAllNodes, Operation: "resetting all nodes"},
 		{Fn: removeBinariesAllNodes, Operation: "removing kubernetes binaries from nodes"},
@@ -440,7 +470,7 @@ func WithContainerDMigration(t Tasks) Tasks {
 			{
 				Fn: func(s *state.State) error {
 					s.Logger.Warn("Now please rolling restart your machineDeployments to get containerd")
-					s.Logger.Warn("see more at: https://docs.kubermatic.com/kubeone/v1.9/cheat-sheets/rollout-machinedeployment/")
+					s.Logger.Warn("see more at: https://docs.kubermatic.com/kubeone/main/cheat-sheets/rollout-machinedeployment/")
 
 					return nil
 				},
@@ -625,7 +655,7 @@ func WithCCMCSIMigration(t Tasks) Tasks {
 			Task{
 				Fn: func(s *state.State) error {
 					s.Logger.Warn("Now please rolling restart your machineDeployments to migrate to ccm/csi")
-					s.Logger.Warn("see more at: https://docs.kubermatic.com/kubeone/v1.9/cheat-sheets/rollout-machinedeployment/")
+					s.Logger.Warn("see more at: https://docs.kubermatic.com/kubeone/main/cheat-sheets/rollout-machinedeployment/")
 					s.Logger.Warn("Once you're done, please run this command again with the '--complete' flag to finish migration")
 
 					return nil
@@ -645,6 +675,10 @@ func updateAllKubelets(s *state.State) error {
 			return err
 		}
 
+		sleep := 30 * time.Second
+		s.Logger.Infof("Sleeping %s seconds, giving time for kubeapi server to restart", sleep)
+		time.Sleep(sleep)
+
 		return nil
-	}, state.RunParallel)
+	}, state.RunSequentially)
 }

@@ -29,6 +29,7 @@ const (
 	AddonCCMDigitalOcean        = "ccm-digitalocean"
 	AddonCCMEquinixMetal        = "ccm-equinixmetal"
 	AddonCCMHetzner             = "ccm-hetzner"
+	AddonCCMKubeVirt            = "ccm-kubevirt"
 	AddonCCMGCP                 = "ccm-gcp"
 	AddonCCMNutanix             = "ccm-nutanix"
 	AddonCCMOpenStack           = "ccm-openstack"
@@ -56,6 +57,7 @@ const (
 	AddonMetricsServer          = "metrics-server"
 	AddonNodeLocalDNS           = "nodelocaldns"
 	AddonOperatingSystemManager = "operating-system-manager"
+	AddonBackupsRestic          = "backups-restic"
 )
 
 func CloudAddons() []string {
@@ -103,7 +105,6 @@ const (
 	VsphereCSINamespace        = "vmware-system-csi"
 	VsphereCSIWebhookName      = "vsphere-webhook-svc"
 	VsphereCSIWebhookNamespace = "vmware-system-csi"
-	NutanixCSIWebhookName      = "csi-snapshot-webhook"
 	GenericCSIWebhookName      = "snapshot-validation-service"
 	GenericCSIWebhookNamespace = metav1.NamespaceSystem
 )
